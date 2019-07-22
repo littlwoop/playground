@@ -1,0 +1,331 @@
+import math
+import random
+import collections
+import queue
+import time
+from collections import deque
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+
+
+class Block:
+    def __init__(self):
+        self.sign = " "
+        self.number = 9999
+        self.occupied = False
+        self.direction = "both"
+        self.visited = 0
+
+
+class AGV:
+    def __init__(self):
+        self.load = Block()
+        self.loaded = False
+        self.position = None
+
+
+epochs = 1000
+# container
+cont_x = 1.540
+cont_y = 1.540
+cont_buffer_x = 0
+cont_buffer_y = 0
+# avg variables
+speed = 1
+acceleration = 1
+turnspeed = 2
+load = 10
+# driveway
+gridblock_x = cont_x + (1 * cont_buffer_x)
+gridblock_y = cont_y + (1 * cont_buffer_y)
+gridblock_area = gridblock_y * gridblock_y
+
+grid = [[Block() for x in range(34)]
+        for y in range(32)]
+# way
+totalsteps = 0
+totalway = 0
+totalturns = 0
+totaltime = 0
+
+print("Grid: ", len(grid), "x", len(grid[0]))
+
+
+def generate_grid():
+    count = 1
+
+    # inbound#ountbound
+    for i in range(11, 22):
+        for j in range(10):
+            grid[i][j].sign = "="
+
+    # packstation
+    for i in range(5, 10):
+        for j in range(10):
+            grid[i][j].sign = "+"
+            if j in (1, 2, 3, 6, 7, 8) and i in (5, 9):
+                grid[i][j].sign = " "
+                # grid[i][j].direction = "up"
+        for j in range(10, 12):
+            grid[i][j].sign = "="
+
+    for i in range(23, 28):
+        for j in range(10):
+            grid[i][j].sign = "+"
+            if j in (1, 2, 3, 6, 7, 8) and i in (23, 27):
+                grid[i][j].sign = " "
+                # grid[i][j].direction = "down"
+        for j in range(10, 12):
+            grid[i][j].sign = "="
+
+    for i in range(len(grid)):
+        for j in range(15, len(grid[i])):
+            if i % 3 != 0 and j not in (23, 33) and i != 31:
+                grid[i][j].sign = "X"
+                grid[i][j].visited = 0
+            # oneways
+            elif i in (0, 6, 12, 18, 24, 30) and j not in (33, 1):
+                grid[i][j].sign = ">"
+                grid[i][j].direction = "right"
+            elif i in (3, 9, 15, 21, 27) and j not in (33, 1):
+                grid[i][j].sign = "<"
+                grid[i][j].direction = "left"
+
+    for i in range(1, 3):
+        for j in range(2, 14):
+            grid[0][j].sign = ">"
+            grid[0][j].direction = "right"
+            if j not in (1, 33) and i != 31:
+                grid[i][j].sign = "X"
+
+    for i in range(len(grid)):
+        # helpercounter
+        k = 0
+        for j in range(len(grid[i])):
+            if grid[i][j].sign in ("X", "=", "+", "P"):
+                grid[i][j].visited = -epochs
+                grid[i][j].occupied = True
+                if grid[i][j].sign == "X":
+                    grid[i][j].number = count
+                    count += 1
+
+
+def print_grid(grid):
+    pass
+
+
+# print('   ',end='')
+# for i in range(len(grid[0])):
+#   print("{:02d} ".format(i),end='')
+# print()
+# for i in range(len(grid)):
+#     row = []
+#     for j in range(len(grid[i])):
+#         row.append(grid[i][j].visited)
+
+#     print("{:02d}".format(i),end='')
+#     print(' ',end='')
+#     #row = '  '.join(str(row))
+# print (row)
+
+def count_storage():
+    storageblocks = 0
+    for i in range(len(grid)):
+        for j in range(len(grid[i])):
+            if grid[i][j].sign == "X":
+                storageblocks += 1
+    print("AVAILEABLE STORAGEBLOCKS: ", storageblocks)
+    return storageblocks
+
+
+def agv_load(agv):
+    agv.loaded = True
+
+
+def agv_unload(agv):
+    agv.loaded = False
+
+
+def bfs(grid, start, target, agv):
+    if type(target) is not tuple:
+        target = findEnd(grid, target)
+    if type(start) is not tuple:
+        start = findEnd(grid, start)
+
+    grid[target[0]][target[1]].occupied = False
+
+    queue = collections.deque([[start]])
+    seen = set([start])
+    width = len(grid[0])
+    height = len(grid)
+    way = 0
+    turns = 0
+    while queue:
+
+        path = queue.popleft()
+
+        y, x = path[-1]
+        if grid[y][x] == grid[target[0]][target[1]]:
+            agv.position = target
+            print("DESTINATION REACHED AFTER",
+                  len(path) - 1, "STEPS, NEW POSITION:", agv.position)
+            pathcalc = calcPath(path)
+            way += pathcalc[0]
+            turns += pathcalc[1]
+            global totalway
+            global totalturns
+            global totalsteps
+            totalsteps += len(path) - 1
+            totalway += way
+            totalturns += turns
+            for step in path:
+                grid[step[0]][step[1]].sign = "o"
+                grid[step[0]][step[1]].visited += 1
+            grid[y][x].sign = "0"
+            grid[y][x].fullnr = 1
+
+            # print_grid(grid)
+
+            return path
+        # rechts
+        if 0 <= x + 1 < width and 0 <= y < height and grid[y][
+            x + 1].direction != "left" and grid[y][x + 1].occupied is False and (
+                y, x + 1) not in seen:
+            queue.append(path + [(y, x + 1)])
+            seen.add((y, x + 1))
+        # links
+        if 0 <= x - 1 < width and 0 <= y < height and grid[y][
+            x - 1].direction != "right" and grid[y][x - 1].occupied is False and (y, x - 1) not in seen:
+            queue.append(path + [(y, x - 1)])
+            seen.add((y, x - 1))
+        # runter
+        if 0 <= x < width and 0 <= y + 1 < height and grid[
+            y + 1][x].direction not in ("up", "straight") and grid[y + 1][x].occupied is False and (
+                y + 1, x) not in seen:
+            queue.append(path + [(y + 1, x)])
+        # rauf
+        if 0 <= x < width and 0 <= y - 1 < height and grid[
+            y - 1][x].direction not in ("down", "straight") and grid[
+            y - 1][x].occupied is False and (y - 1, x) not in seen:
+            queue.append(path + [(y - 1, x)])
+            seen.add((y - 1, x))
+
+
+def findEnd(grid, pos1):
+    for i in range(len(grid)):
+        for j in range(len(grid[0])):
+            if grid[i][j].number == pos1:
+                return tuple([i, j])
+    return None
+
+
+# turns do not take in account the initial position of agv
+def calcPath(path):
+    x_steps = 0
+    y_steps = 0
+    way = 0
+    turns = 0
+    turnat = 0
+    laststep = ""
+    for i in range(len(path) - 1):
+        if path[i][0] == path[i + 1][0]:
+            if laststep == "y":
+                turns += 1
+                calcTime(len(path[turnat + 1:i + 1]) * gridblock_x, 1)
+                turnat = i
+            x_steps += 1
+
+            laststep = "x"
+        else:
+            if laststep == "x":
+                turns += 1
+                calcTime(len(path[turnat + 1:i + 1]) * gridblock_y, 1)
+                turnat = i
+            y_steps += 1
+            laststep = "y"
+
+    way = (x_steps * gridblock_x) + (y_steps * gridblock_y)
+    print(way, "m", turns, "TURNS")
+    return way, turns
+
+
+def calcTime(totalway, totalturns):
+    time = 0
+    global totaltime
+
+    t_accel = acceleration / speed
+    avg_velocity = (0 + speed) / 2
+    s_accel = t_accel * avg_velocity
+    time += t_accel * 2
+    time += totalturns * turnspeed
+    time += (totalway - 2 * s_accel) * speed
+    totaltime += time
+    return time
+
+
+generate_grid()
+storageblocks = count_storage()
+agv = AGV()
+
+inbound = [(12, 9), (13, 9), (19, 9), (20, 9)]
+wrapper = [(16, 9)]
+packstation_source = [(8, 1), (8, 2), (8, 3), (8, 6), (8, 7), (8, 9), (24, 1), (24, 2), (24, 3), (24, 6), (24, 7),
+                      (24, 9)]
+packstation_target = [(6, 1), (6, 2), (6, 3), (6, 6), (6, 7), (6, 9), (26, 1), (26, 2), (26, 3), (26, 6), (26, 7),
+                      (26, 9)]
+fastmover = []
+
+for i in (8, 9, 11, 12, 14, 15, 17, 19, 20, 22, 23):
+    for j in range(18, 32):
+        if j is not 25:
+            fastmover.append((i, j))
+
+for i in range(epochs):
+    generate_grid()
+    result = grid
+    pos1 = random.randint(1, storageblocks)
+    # #RANDOMINBOUND-RANDOMSTORAGE
+    # path = bfs(grid, inbound[random.randint(0,len(inbound)-1)], pos1, agv)
+
+    # RANDOMPICKSTATION-STORAGE-RANDOMPICKSTATION
+    # path = bfs(grid, packstation_source[random.randint(0,len(packstation_source)-1)], pos1, agv)
+    # path = bfs(grid, agv.position , packstation_source[random.randint(0,len(packstation_source)-1)], agv)
+
+    # RANDOMPICKSTATION-FASTMOVER-RANDOMPICKSTATION
+    # path = bfs(grid, packstation_source[random.randint(0,len(packstation_source)-1)], fastmover[random.randint(0,len(fastmover)-1)], agv)
+    # path = bfs(grid, agv.position , packstation_source[random.randint(0,len(packstation_source)-1)], agv)
+
+    # RANDOM PORTAL-RANDOM WICKLER
+    # path = bfs(grid, packstation_target[random.randint(0,len(packstation_target)-1)], wrapper[random.randint(0,len(wrapper)-1)], agv)
+
+    # #RANDOMINBOUND-RANDOMSTORAGE-PACKSTATIONSLOT
+    path = bfs(grid, inbound[random.randint(0, len(inbound) - 1)], pos1, agv)
+    path = bfs(grid, agv.position, packstation_source[random.randint(0, len(packstation_source) - 1)], agv)
+
+average_steps = totalsteps / epochs
+average_turns = totalturns / epochs
+average_way = totalway / epochs
+average_time = totaltime / epochs
+
+# print(result)
+
+# print("_________________________________________________________________")
+# print("total steps:", "%.2f" %totalsteps, "\ttotal way:", "%.2f" %totalway, "m \ttotal turns", "%.2f" %totalturns,
+#        "\t\ttotal time:", "%.2f" %totaltime, "seconds")
+# print("average steps:", "%.2f" %average_steps, "\taverage way:", "%.2f" %average_way, "m \taverage turns", "%.2f" %average_turns,
+#        "\taverage time:", "%.2f" % average_time, "seconds")
+
+
+# extracting only visited
+new_grid = []
+for a in range(len(result)):
+    row = []
+    for x in range(len(result)):
+        row.append(result[a][x].visited)
+    new_grid.append(row)
+
+a = np.array(new_grid)
+ax = sns.heatmap(a, linewidth=0.1)
+# plt.imshow(a, cmap='hot', interpolation='nearest')
+plt.show()
